@@ -3,6 +3,7 @@
 #include <iostream>
 #include <thread>
 #include <chrono>
+#include <filesystem> // Include filesystem for file existence check
 
 Collector::Collector(const std::string& configPath) 
     : running_(false) {
@@ -17,6 +18,13 @@ Collector::~Collector() {
 
 bool Collector::parseConfig(const std::string& configPath) {
     try {
+        // Check if the file exists
+        if (!std::filesystem::exists(configPath)) {
+            // print absolute path
+            std::cerr << "Configuration file does not exist: " << std::filesystem::absolute(configPath) << std::endl;
+            return false;
+        }
+
         YAML::Node config = YAML::LoadFile(configPath);
         
         // Parse receivers
