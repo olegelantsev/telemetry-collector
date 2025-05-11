@@ -1,4 +1,4 @@
-# Unofficial OTel Processor in CPP because why not
+# Unofficial OTel telemetry collector in CPP because why not
 
 ```
 # prerequisite
