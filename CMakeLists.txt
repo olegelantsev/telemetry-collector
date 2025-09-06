@@ -32,7 +32,6 @@ target_include_directories(otlp_collector PRIVATE
 
 target_link_libraries(otlp_collector PRIVATE
     ${OPENTELEMETRY_CPP_LIBRARIES}
-    gRPC::grpc++
     protobuf::libprotobuf
     yaml-cpp::yaml-cpp
 )
