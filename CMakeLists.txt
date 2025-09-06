@@ -20,6 +20,7 @@ set(SOURCES
     src/receiver.cpp
     src/exporter.cpp
     src/batch_processor.cpp
+    src/otlp_exporter.cpp
 )
 
 # Executable

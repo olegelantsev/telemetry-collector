@@ -5,6 +5,7 @@
 #include <chrono>
 #include <filesystem> // Include filesystem for file existence check
 #include "batch_processor.h"
+#include "otlp_exporter.h"
 
 Collector::Collector(const std::string& configPath) 
     : running_(false) {
