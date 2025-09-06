@@ -52,7 +52,10 @@ void OtlpGrpcReceiver::stop() {
 class OtlpHttpSession : public std::enable_shared_from_this<OtlpHttpSession> {
 public:
     OtlpHttpSession(tcp::socket socket)
-        : socket_(std::move(socket)) {}
+        : socket_(std::move(socket)) {
+        std::cout << "New HTTP connection established from " 
+                  << socket_.remote_endpoint().address().to_string() << std::endl;
+    }
 
     void start() { readRequest(); }
 
@@ -60,6 +63,7 @@ private:
     tcp::socket socket_;
     beast::flat_buffer buffer_;
     http::request<http::string_body> req_;
+    http::response<http::string_body> res_;
 
     void readRequest() {
         auto self = shared_from_this();
@@ -72,25 +76,53 @@ private:
 
     void handleRequest() {
         if (req_.method() == http::verb::post && req_.target() == "/v1/metrics") {
-            std::cout << "Received OTLP HTTP data: " << req_.body() << std::endl;
-            http::response<http::string_body> res{http::status::ok, req_.version()};
-            res.set(http::field::content_type, "application/json");
-            res.body() = "{}";
-            res.prepare_payload();
+            // std::cout << "Received OTLP HTTP data: " << req_.body() << std::endl;
+
+            // // Parse metric names from OTLP JSON payload (basic example)
+            // try {
+            //     auto metrics_pos = req_.body().find("\"metrics\"");
+            //     if (metrics_pos != std::string::npos) {
+            //         size_t pos = metrics_pos;
+            //         while ((pos = req_.body().find("\"name\"", pos)) != std::string::npos) {
+            //             size_t start = req_.body().find(':', pos);
+            //             size_t quote1 = req_.body().find('"', start + 1);
+            //             size_t quote2 = req_.body().find('"', quote1 + 1);
+            //             if (quote1 != std::string::npos && quote2 != std::string::npos) {
+            //                 std::string metric_name = req_.body().substr(quote1 + 1, quote2 - quote1 - 1);
+            //                 std::cout << "Metric name: " << metric_name << std::endl;
+            //                 pos = quote2;
+            //             } else {
+            //                 break;
+            //             }
+            //         }
+            //     }
+            // } catch (...) {
+            //     std::cerr << "Failed to parse metric names from HTTP payload" << std::endl;
+            // }
+
+            res_ = {http::status::ok, req_.version()};
+            res_.set(http::field::content_type, "application/json");
+            res_.body() = "{}";
+            res_.prepare_payload();
             auto self = shared_from_this();
-            http::async_write(socket_, res,
-                [self](beast::error_code ec, std::size_t) {
-                    self->socket_.shutdown(tcp::socket::shutdown_send, ec);
+            http::async_write(socket_, res_,
+                [self](beast::error_code ec, std::size_t bytes_transferred) {
+                    boost::ignore_unused(bytes_transferred);
+                    // Only shutdown after write completes
+                    beast::error_code ignore_ec;
+                    self->socket_.shutdown(tcp::socket::shutdown_send, ignore_ec);
+                    // Session will be destroyed after this handler if no more references
                 });
         } else {
-            http::response<http::string_body> res{http::status::not_found, req_.version()};
-            res.set(http::field::content_type, "text/plain");
-            res.body() = "Not Found";
-            res.prepare_payload();
+            res_ = {http::status::not_found, req_.version()};
+            res_.set(http::field::content_type, "text/plain");
+            res_.body() = "Not Found";
+            res_.prepare_payload();
             auto self = shared_from_this();
-            http::async_write(socket_, res,
+            http::async_write(socket_, res_,
                 [self](beast::error_code ec, std::size_t) {
-                    self->socket_.shutdown(tcp::socket::shutdown_send, ec);
+                    beast::error_code ignore_ec;
+                    self->socket_.shutdown(tcp::socket::shutdown_send, ignore_ec);
                 });
         }
     }
@@ -115,14 +147,24 @@ void OtlpHttpReceiver::start() {
 
     std::thread([this, host, port]() {
         try {
-            net::io_context ioc{1};
+            net::io_context ioc;
+
             tcp::acceptor acceptor{ioc, tcp::endpoint(net::ip::make_address(host), port)};
             std::cout << "HTTP server is running on " << host << ":" << port << std::endl;
-            while (running_) {
-                tcp::socket socket{ioc};
-                acceptor.accept(socket);
-                std::make_shared<OtlpHttpSession>(std::move(socket))->start();
-            }
+
+            // Accept connections asynchronously
+            std::function<void()> do_accept;
+            do_accept = [&]() {
+                acceptor.async_accept([&](beast::error_code ec, tcp::socket socket) {
+                    if (!ec) {
+                        std::make_shared<OtlpHttpSession>(std::move(socket))->start();
+                    }
+                    if (running_) do_accept();
+                });
+            };
+            do_accept();
+
+            ioc.run(); // <--- This is required for async handlers to be called
         } catch (const std::exception& e) {
             std::cerr << "HTTP server error: " << e.what() << std::endl;
         }

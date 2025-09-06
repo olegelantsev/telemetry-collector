@@ -12,7 +12,7 @@ void signalHandler(int signum) {
 }
 
 int main(int argc, char* argv[]) {
-    std::string configPath = "config.yaml";
+    std::string configPath = "config/config.yaml";
     
     // Allow custom config path
     if (argc > 1) {

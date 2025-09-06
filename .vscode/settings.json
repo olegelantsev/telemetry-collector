@@ -71,6 +71,11 @@
         "type_traits": "cpp",
         "utility": "cpp",
         "format": "cpp",
-        "cinttypes": "cpp"
+        "cinttypes": "cpp",
+        "iomanip": "cpp",
+        "list": "cpp",
+        "semaphore": "cpp",
+        "system_error": "cpp",
+        "stop_token": "cpp"
     }
 }
