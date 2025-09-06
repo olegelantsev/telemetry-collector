@@ -11,8 +11,8 @@ class OtlpExporter : public Exporter {
 public:
     OtlpExporter(const std::string& endpoint);
     
-    void exportTraces(const std::vector<opentelemetry::sdk::trace::SpanData>& spans) override;
-    void exportMetrics(const std::vector<opentelemetry::sdk::metrics::MetricData>& metrics) override;
+    virtual void handleMetrics(std::vector<opentelemetry::sdk::metrics::MetricData>& metrics) override;
+    virtual void handleTraces(std::vector<opentelemetry::sdk::trace::SpanData>& spans) override;
 
 private:
     std::string endpoint_;

@@ -21,6 +21,7 @@ set(SOURCES
     src/exporter.cpp
     src/batch_processor.cpp
     src/otlp_exporter.cpp
+    src/pipeline.cpp
 )
 
 # Executable

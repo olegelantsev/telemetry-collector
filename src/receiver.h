@@ -16,8 +16,15 @@ public:
         nextProcessor_ = processor;
     }
 
+    // Add setOnData method to register a callback
+    template<typename Callback>
+    void setOnData(Callback&& cb) {
+        onData_ = std::forward<Callback>(cb);
+    }
+
 protected:
     std::shared_ptr<Processor> nextProcessor_;
+    std::function<void(const std::string&)> onData_;
 };
 
 class OtlpGrpcReceiver : public Receiver {
@@ -40,6 +47,7 @@ public:
     void start() override;
     void stop() override;
 
+    
 private:
     std::string endpoint_;
     bool running_;
