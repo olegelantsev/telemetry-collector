@@ -4,6 +4,8 @@
 #include <thread>
 #include <boost/asio.hpp>
 #include <boost/beast.hpp>
+#include <google/protobuf/util/json_util.h>
+#include <opentelemetry/proto/collector/metrics/v1/metrics_service.pb.h>
 #include <opentelemetry/proto/metrics/v1/metrics.grpc.pb.h>
 #include <opentelemetry/proto/collector/metrics/v1/metrics_service.grpc.pb.h>
 
@@ -12,7 +14,6 @@ namespace http = beast::http;
 namespace net = boost::asio;
 using tcp = net::ip::tcp;
 
-// gRPC receiver (unchanged)
 class OtlpServiceImpl final : public ::opentelemetry::proto::collector::metrics::v1::MetricsService::Service {
 public:
     ::grpc::Status Export(::grpc::ServerContext* context, const ::opentelemetry::proto::collector::metrics::v1::ExportMetricsServiceRequest* request, ::opentelemetry::proto::collector::metrics::v1::ExportMetricsServiceResponse* response) override {
@@ -76,29 +77,22 @@ private:
 
     void handleRequest() {
         if (req_.method() == http::verb::post && req_.target() == "/v1/metrics") {
-            // std::cout << "Received OTLP HTTP data: " << req_.body() << std::endl;
+            std::cout << "Received OTLP HTTP Protobuf data, size: " << req_.body().size() << std::endl;
 
-            // // Parse metric names from OTLP JSON payload (basic example)
-            // try {
-            //     auto metrics_pos = req_.body().find("\"metrics\"");
-            //     if (metrics_pos != std::string::npos) {
-            //         size_t pos = metrics_pos;
-            //         while ((pos = req_.body().find("\"name\"", pos)) != std::string::npos) {
-            //             size_t start = req_.body().find(':', pos);
-            //             size_t quote1 = req_.body().find('"', start + 1);
-            //             size_t quote2 = req_.body().find('"', quote1 + 1);
-            //             if (quote1 != std::string::npos && quote2 != std::string::npos) {
-            //                 std::string metric_name = req_.body().substr(quote1 + 1, quote2 - quote1 - 1);
-            //                 std::cout << "Metric name: " << metric_name << std::endl;
-            //                 pos = quote2;
-            //             } else {
-            //                 break;
-            //             }
-            //         }
-            //     }
-            // } catch (...) {
-            //     std::cerr << "Failed to parse metric names from HTTP payload" << std::endl;
-            // }
+            // Parse OTLP protobuf from binary payload
+            opentelemetry::proto::collector::metrics::v1::ExportMetricsServiceRequest pbRequest;
+            if (!pbRequest.ParseFromString(req_.body())) {
+                std::cerr << "Failed to parse OTLP Protobuf payload" << std::endl;
+            } else {
+                // Print metric names
+                for (const auto& resourceMetrics : pbRequest.resource_metrics()) {
+                    for (const auto& scopeMetrics : resourceMetrics.scope_metrics()) {
+                        for (const auto& metric : scopeMetrics.metrics()) {
+                            std::cout << "Metric name: " << metric.name() << std::endl;
+                        }
+                    }
+                }
+            }
 
             res_ = {http::status::ok, req_.version()};
             res_.set(http::field::content_type, "application/json");
@@ -108,10 +102,8 @@ private:
             http::async_write(socket_, res_,
                 [self](beast::error_code ec, std::size_t bytes_transferred) {
                     boost::ignore_unused(bytes_transferred);
-                    // Only shutdown after write completes
                     beast::error_code ignore_ec;
                     self->socket_.shutdown(tcp::socket::shutdown_send, ignore_ec);
-                    // Session will be destroyed after this handler if no more references
                 });
         } else {
             res_ = {http::status::not_found, req_.version()};
