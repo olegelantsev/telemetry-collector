@@ -5,9 +5,7 @@
 #include <string>
 #include <vector>
 
-#include "processor.h"
-#include "receiver.h"
-#include "exporter.h"
+#include "pipeline.h"
 
 class Collector {
 public:
@@ -20,9 +18,7 @@ public:
 private:
     bool parseConfig(const std::string& configPath);
     
-    std::vector<std::unique_ptr<Receiver>> receivers_;
-    std::vector<std::unique_ptr<Processor>> processors_;
-    std::vector<std::unique_ptr<Exporter>> exporters_;
+    std::vector<std::unique_ptr<Pipeline>> pipelines_;
     
     bool running_;
 };

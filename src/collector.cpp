@@ -1,11 +1,15 @@
 #include "collector.h"
+#include "pipeline.h"
 #include <yaml-cpp/yaml.h>
 #include <iostream>
 #include <thread>
 #include <chrono>
-#include <filesystem> // Include filesystem for file existence check
+#include <filesystem>
 #include "batch_processor.h"
 #include "otlp_exporter.h"
+#include "processor.h"
+#include "receiver.h"
+#include "exporter.h"
 
 Collector::Collector(const std::string& configPath) 
     : running_(false) {
@@ -20,61 +24,84 @@ Collector::~Collector() {
 
 bool Collector::parseConfig(const std::string& configPath) {
     try {
-        // Check if the file exists
         if (!std::filesystem::exists(configPath)) {
-            // print absolute path
             std::cerr << "Configuration file does not exist: " << std::filesystem::absolute(configPath) << std::endl;
             return false;
         }
 
         YAML::Node config = YAML::LoadFile(configPath);
-        
-        // Parse receivers
-        if (config["receivers"]) {
-            auto receiverNodes = config["receivers"];
-            for (const auto& receiver : receiverNodes) {
-                std::string receiverType = receiver.first.as<std::string>();
-                if (receiverType == "otlp") {
-                    YAML::Node protocols = receiver.second["protocols"];
-                    
-                    // GRPC receiver
-                    if (protocols["grpc"]) {
-                        std::string endpoint = protocols["grpc"]["endpoint"].as<std::string>();
-                        receivers_.push_back(std::make_unique<OtlpGrpcReceiver>(endpoint));
+
+        // Parse pipelines
+        if (!config["service"]) {
+            std::cerr << "No service section in config" << std::endl;
+            return false;
+        }
+        auto service = config["service"];
+        if (!service["pipelines"]) {
+            std::cerr << "No pipelines defined in services section" << std::endl;
+            return false;
+        }
+        if (service["pipelines"]) {
+            auto pipelineNodes = service["pipelines"];
+            for (const auto& pipelineNode : pipelineNodes) {
+                std::string pipelineName = pipelineNode.first.as<std::string>();
+                YAML::Node pipelineConfig = pipelineNode.second;
+
+                auto pipeline = std::make_unique<Pipeline>(pipelineName);
+
+                // Receivers
+                if (pipelineConfig["receivers"]) {
+                    for (const auto& receiver : pipelineConfig["receivers"]) {
+                        std::string receiverType = receiver.as<std::string>();
+                        if (config["receivers"] && config["receivers"][receiverType]) {
+                            YAML::Node receiverDef = config["receivers"][receiverType];
+                            if (receiverDef["protocols"]) {
+                                YAML::Node protocols = receiverDef["protocols"];
+                                if (protocols["grpc"]) {
+                                    std::string endpoint = protocols["grpc"]["endpoint"].as<std::string>();
+                                    pipeline->addReceiver(std::make_shared<OtlpGrpcReceiver>(endpoint));
+                                }
+                                if (protocols["http"]) {
+                                    std::string endpoint = protocols["http"]["endpoint"].as<std::string>();
+                                    pipeline->addReceiver(std::make_shared<OtlpHttpReceiver>(endpoint));
+                                }
+                            }
+                        }
                     }
-                    
-                    // HTTP receiver
-                    if (protocols["http"]) {
-                        std::string endpoint = protocols["http"]["endpoint"].as<std::string>();
-                        receivers_.push_back(std::make_unique<OtlpHttpReceiver>(endpoint));
+                }
+
+                // Processors
+                if (pipelineConfig["processors"]) {
+                    for (const auto& processor : pipelineConfig["processors"]) {
+                        std::string processorType = processor.as<std::string>();
+                        if (config["processors"] && config["processors"][processorType]) {
+                            // Example: only batch processor supported
+                            if (processorType == "batch") {
+                                pipeline->addProcessor(std::make_shared<BatchProcessor>());
+                            }
+                        }
                     }
                 }
-            }
-        }
-        
-        // Parse processors
-        if (config["processors"]) {
-            auto processorNodes = config["processors"];
-            for (const auto& processor : processorNodes) {
-                std::string processorType = processor.first.as<std::string>();
-                if (processorType == "batch") {
-                    processors_.push_back(std::make_unique<BatchProcessor>());
+
+                // Exporters
+                if (pipelineConfig["exporters"]) {
+                    for (const auto& exporter : pipelineConfig["exporters"]) {
+                        std::string exporterType = exporter.as<std::string>();
+                        if (config["exporters"] && config["exporters"][exporterType]) {
+                            YAML::Node exporterDef = config["exporters"][exporterType];
+                            if (exporterType == "otlp") {
+                                std::string endpoint = exporterDef["endpoint"].as<std::string>();
+                                pipeline->addExporter(std::make_shared<OtlpExporter>(endpoint));
+                            }
+                        }
+                    }
                 }
+
+                pipeline->initialize();
+                pipelines_.push_back(std::move(pipeline));
             }
         }
-        
-        // Parse exporters
-        if (config["exporters"]) {
-            auto exporterNodes = config["exporters"];
-            for (const auto& exporter : exporterNodes) {
-                std::string exporterType = exporter.first.as<std::string>();
-                if (exporterType == "otlp") {
-                    std::string endpoint = exporter.second["endpoint"].as<std::string>();
-                    exporters_.push_back(std::make_unique<OtlpExporter>(endpoint));
-                }
-            }
-        }
-        
+
         return true;
     } catch (const std::exception& e) {
         std::cerr << "Error parsing config: " << e.what() << std::endl;
@@ -86,17 +113,15 @@ void Collector::start() {
     if (running_) {
         return;
     }
-    
     running_ = true;
-    
-    // Start all receivers
-    for (auto& receiver : receivers_) {
-        receiver->start();
+
+    // Start all pipelines
+    for (auto& pipeline : pipelines_) {
+        pipeline->start();
     }
-    
-    std::cout << "Collector pipeline started" << std::endl;
-    
-    // Keep running until shutdown is called
+
+    std::cout << "Collector pipeline(s) started" << std::endl;
+
     while (running_) {
         std::this_thread::sleep_for(std::chrono::seconds(1));
     }
@@ -106,13 +131,12 @@ void Collector::shutdown() {
     if (!running_) {
         return;
     }
-    
     running_ = false;
-    
-    // Stop all receivers
-    for (auto& receiver : receivers_) {
-        receiver->stop();
+
+    // Stop all pipelines
+    for (auto& pipeline : pipelines_) {
+        pipeline->shutdown();
     }
-    
-    std::cout << "Collector pipeline stopped" << std::endl;
+
+    std::cout << "Collector pipeline(s) stopped" << std::endl;
 }
