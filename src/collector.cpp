@@ -4,6 +4,7 @@
 #include <thread>
 #include <chrono>
 #include <filesystem> // Include filesystem for file existence check
+#include "batch_processor.h"
 
 Collector::Collector(const std::string& configPath) 
     : running_(false) {

@@ -19,6 +19,7 @@ set(SOURCES
     src/processor.cpp
     src/receiver.cpp
     src/exporter.cpp
+    src/batch_processor.cpp
 )
 
 # Executable
